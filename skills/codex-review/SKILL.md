@@ -39,12 +39,17 @@ Run these in order. Use the first Codex method that works:
 
 **A) Codex CLI** (preferred – has sandbox, can execute):
 ```bash
-codex --approval-policy on-failure --sandbox read-only "Run these checks on the codebase and report failures only:
+codex exec -s read-only "Run these checks on the codebase and report failures only:
 1. npx tsc --noEmit (type errors)
 2. npx eslint --no-warn . (lint errors only)
 3. grep -r 'TODO\|FIXME\|HACK\|XXX' in changed files
 4. Check for hardcoded secrets: API keys, tokens, passwords in source
 Report file names, line numbers, and error messages. No commentary."
+```
+
+Or use the built-in review command:
+```bash
+codex review --uncommitted
 ```
 
 **B) Codex MCP tool** (if CLI unavailable):
