@@ -64,9 +64,22 @@ You can also register Codex as an MCP server:
 claude mcp add codex -s user -- codex mcp-server
 ```
 
-### Experimental: Codex with Claude Max
+### Codex with Claude Max (no OpenAI key needed)
 
-The `proxy/` folder contains an experimental adapter that routes Codex through your Claude Max subscription instead of an OpenAI key. Codex's agentic tools (`exec_shell`, `apply_patch`) don't fully work with Claude as the backend model yet. The proxy infrastructure is ready for when Codex improves its model-agnostic support.
+The `proxy/` folder contains an adapter that routes Codex through your Claude Max subscription instead of an OpenAI key. It translates the Responses API to Chat Completions, injects tool schemas into the prompt, and parses structured tool calls from Claude's responses – so Codex's sandbox execution works end-to-end.
+
+```bash
+# One-time setup
+bash proxy/setup.sh
+
+# Start the proxy chain (ports 3456 + 4000)
+bash proxy/start.sh
+
+# Codex now uses Claude Max
+codex exec -s read-only "Run npx tsc --noEmit and report errors"
+```
+
+Requires [claude-max-api-proxy](https://www.npmjs.com/package/claude-max-api-proxy) and an authenticated Claude Code CLI.
 
 ## Uninstall
 
