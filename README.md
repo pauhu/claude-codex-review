@@ -1,4 +1,4 @@
-# Code Review Skill for Claude Code
+# Codex Code Review Skill for Claude Code
 
 Claude orchestrates, Codex reviews. Five perspectives: security, correctness, compliance, performance, maintainability.
 
@@ -48,3 +48,4 @@ rm -rf ~/.claude/skills/codex-review
 ## License
 
 MIT – [Pauhu](https://pauhu.ai)
+
