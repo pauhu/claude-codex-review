@@ -6,6 +6,8 @@
  * Translates to Chat Completions format (POST /v1/chat/completions)
  * Forwards to claude-max-api-proxy at UPSTREAM (default localhost:3456)
  *
+ * Handles: messages, tool definitions, tool calls, streaming
+ *
  * This lets Codex CLI v0.98+ (which only speaks Responses API)
  * work with claude-max-api-proxy (which only speaks Chat Completions).
  */
@@ -25,15 +27,44 @@ function responsesToChatBody(body) {
     messages.push({ role: "system", content: body.instructions });
   }
 
-  // input → user messages
+  // input → messages (including tool calls and results)
   if (typeof body.input === "string") {
     messages.push({ role: "user", content: body.input });
   } else if (Array.isArray(body.input)) {
     for (const item of body.input) {
       if (typeof item === "string") {
         messages.push({ role: "user", content: item });
+      } else if (item.type === "function_call") {
+        // Previous assistant tool call — Codex replays these
+        messages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [{
+            id: item.call_id || item.id,
+            type: "function",
+            function: {
+              name: item.name,
+              arguments: item.arguments || "{}",
+            },
+          }],
+        });
+      } else if (item.type === "function_call_output") {
+        // Tool result from Codex execution
+        messages.push({
+          role: "tool",
+          tool_call_id: item.call_id,
+          content: typeof item.output === "string" ? item.output : JSON.stringify(item.output || ""),
+        });
+      } else if (item.type === "message") {
+        const content = Array.isArray(item.content)
+          ? item.content.map(c => c.text || c.content || "").join("")
+          : item.content || "";
+        messages.push({ role: item.role || "user", content });
       } else if (item.role) {
-        messages.push({ role: item.role, content: item.content || "" });
+        const content = Array.isArray(item.content)
+          ? item.content.map(c => c.text || c.content || "").join("")
+          : item.content || "";
+        messages.push({ role: item.role, content });
       }
     }
   }
@@ -42,16 +73,40 @@ function responsesToChatBody(body) {
     messages.push({ role: "user", content: "" });
   }
 
-  return {
+  const result = {
     model: body.model || "claude-sonnet-4",
     messages,
     stream: true,
   };
+
+  // Convert tools: Responses API → Chat Completions format
+  if (body.tools && body.tools.length > 0) {
+    result.tools = body.tools
+      .filter(t => t.type === "function")
+      .map(t => ({
+        type: "function",
+        function: {
+          name: t.name,
+          description: t.description || "",
+          parameters: t.parameters || { type: "object", properties: {} },
+        },
+      }));
+  }
+
+  if (body.tool_choice) {
+    result.tool_choice = body.tool_choice;
+  }
+
+  return result;
 }
 
-// Generate a response ID
+// Generate IDs
 function respId() {
   return "resp_" + Math.random().toString(36).slice(2, 14);
+}
+
+function callId() {
+  return "call_" + Math.random().toString(36).slice(2, 14);
 }
 
 // SSE helper
@@ -73,6 +128,11 @@ function handleResponses(req, res) {
       return;
     }
 
+    // Log tools for debugging
+    if (body.tools && body.tools.length > 0) {
+      console.log(`[adapter] ${body.tools.length} tools: ${body.tools.map(t => t.name).join(", ")}`);
+    }
+
     const chatBody = responsesToChatBody(body);
     const chatPayload = JSON.stringify(chatBody);
     const id = respId();
@@ -90,21 +150,6 @@ function handleResponses(req, res) {
       response: { id, object: "response", status: "in_progress", output: [] },
     });
 
-    // Send output_item.added
-    sse(res, "response.output_item.added", {
-      type: "response.output_item.added",
-      output_index: 0,
-      item: { type: "message", role: "assistant", content: [] },
-    });
-
-    // Send content_part.added
-    sse(res, "response.content_part.added", {
-      type: "response.content_part.added",
-      output_index: 0,
-      content_index: 0,
-      part: { type: "output_text", text: "" },
-    });
-
     // Forward to upstream (chat completions)
     const upstreamReq = http.request(
       {
@@ -120,6 +165,11 @@ function handleResponses(req, res) {
       (upstreamRes) => {
         let fullText = "";
         let buffer = "";
+        let textStarted = false;
+        let outputIndex = 0;
+
+        // Accumulate tool calls from streaming chunks
+        const toolCalls = {}; // index → {id, name, arguments}
 
         upstreamRes.on("data", (chunk) => {
           buffer += chunk.toString();
@@ -135,38 +185,161 @@ function handleResponses(req, res) {
             try {
               const parsed = JSON.parse(data);
               const delta = parsed.choices?.[0]?.delta;
-              const text = delta?.content;
               const finish = parsed.choices?.[0]?.finish_reason;
 
+              // Handle text content
+              const text = delta?.content;
               if (text) {
+                if (!textStarted) {
+                  textStarted = true;
+                  sse(res, "response.output_item.added", {
+                    type: "response.output_item.added",
+                    output_index: outputIndex,
+                    item: { type: "message", role: "assistant", content: [] },
+                  });
+                  sse(res, "response.content_part.added", {
+                    type: "response.content_part.added",
+                    output_index: outputIndex,
+                    content_index: 0,
+                    part: { type: "output_text", text: "" },
+                  });
+                }
                 fullText += text;
                 sse(res, "response.output_text.delta", {
                   type: "response.output_text.delta",
-                  output_index: 0,
+                  output_index: outputIndex,
                   content_index: 0,
                   delta: text,
                 });
               }
 
+              // Handle tool calls (streaming)
+              if (delta?.tool_calls) {
+                for (const tc of delta.tool_calls) {
+                  const idx = tc.index || 0;
+                  if (!toolCalls[idx]) {
+                    toolCalls[idx] = {
+                      id: tc.id || callId(),
+                      name: tc.function?.name || "",
+                      arguments: "",
+                    };
+                  }
+                  if (tc.id) toolCalls[idx].id = tc.id;
+                  if (tc.function?.name) toolCalls[idx].name = tc.function.name;
+                  if (tc.function?.arguments) toolCalls[idx].arguments += tc.function.arguments;
+                }
+              }
+
+              // Finish: emit tool calls or text completion
+              if (finish === "tool_calls") {
+                // Close text if it was started
+                if (textStarted) {
+                  sse(res, "response.output_text.done", {
+                    type: "response.output_text.done",
+                    output_index: outputIndex,
+                    content_index: 0,
+                    text: fullText,
+                  });
+                  sse(res, "response.content_part.done", {
+                    type: "response.content_part.done",
+                    output_index: outputIndex,
+                    content_index: 0,
+                    part: { type: "output_text", text: fullText },
+                  });
+                  sse(res, "response.output_item.done", {
+                    type: "response.output_item.done",
+                    output_index: outputIndex,
+                    item: {
+                      type: "message",
+                      role: "assistant",
+                      content: [{ type: "output_text", text: fullText }],
+                    },
+                  });
+                  outputIndex++;
+                }
+
+                // Emit each tool call as a function_call output item
+                const outputItems = [];
+                const indices = Object.keys(toolCalls).sort((a, b) => a - b);
+                for (const idx of indices) {
+                  const tc = toolCalls[idx];
+                  const item = {
+                    type: "function_call",
+                    id: tc.id,
+                    call_id: tc.id,
+                    name: tc.name,
+                    arguments: tc.arguments,
+                  };
+
+                  console.log(`[adapter] tool_call: ${tc.name}(${tc.arguments.slice(0, 100)}...)`);
+
+                  sse(res, "response.output_item.added", {
+                    type: "response.output_item.added",
+                    output_index: outputIndex,
+                    item,
+                  });
+                  sse(res, "response.output_item.done", {
+                    type: "response.output_item.done",
+                    output_index: outputIndex,
+                    item,
+                  });
+
+                  outputItems.push(item);
+                  outputIndex++;
+                }
+
+                // Build final output array
+                const output = [];
+                if (fullText) {
+                  output.push({
+                    type: "message",
+                    role: "assistant",
+                    content: [{ type: "output_text", text: fullText }],
+                  });
+                }
+                output.push(...outputItems);
+
+                sse(res, "response.completed", {
+                  type: "response.completed",
+                  response: { id, object: "response", status: "completed", output },
+                });
+                res.end();
+              }
+
               if (finish === "stop") {
-                // Send completion events
+                // Text-only completion (no tool calls)
+                if (!textStarted) {
+                  // Model returned empty — send minimal response
+                  sse(res, "response.output_item.added", {
+                    type: "response.output_item.added",
+                    output_index: 0,
+                    item: { type: "message", role: "assistant", content: [] },
+                  });
+                  sse(res, "response.content_part.added", {
+                    type: "response.content_part.added",
+                    output_index: 0,
+                    content_index: 0,
+                    part: { type: "output_text", text: "" },
+                  });
+                }
+
                 sse(res, "response.output_text.done", {
                   type: "response.output_text.done",
-                  output_index: 0,
+                  output_index: outputIndex,
                   content_index: 0,
                   text: fullText,
                 });
 
                 sse(res, "response.content_part.done", {
                   type: "response.content_part.done",
-                  output_index: 0,
+                  output_index: outputIndex,
                   content_index: 0,
                   part: { type: "output_text", text: fullText },
                 });
 
                 sse(res, "response.output_item.done", {
                   type: "response.output_item.done",
-                  output_index: 0,
+                  output_index: outputIndex,
                   item: {
                     type: "message",
                     role: "assistant",
@@ -258,7 +431,7 @@ const server = http.createServer((req, res) => {
     handleModels(req, res);
   } else if (req.method === "GET" && req.url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ status: "ok", adapter: "responses-to-chat" }));
+    res.end(JSON.stringify({ status: "ok", adapter: "responses-to-chat", tools: true }));
   } else {
     res.writeHead(404);
     res.end("Not found");
@@ -268,4 +441,5 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, () => {
   console.log(`Responses adapter listening on http://localhost:${PORT}`);
   console.log(`Forwarding to http://${UPSTREAM_HOST}:${UPSTREAM_PORT}`);
+  console.log("Tool support: enabled");
 });
