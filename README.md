@@ -1,13 +1,18 @@
 # Code Review Skill for Claude Code
 
-Five-perspective code review: security, correctness, compliance, performance, maintainability.
+Claude orchestrates, Codex reviews. Five perspectives: security, correctness, compliance, performance, maintainability.
 
 ## Install
 
 ```bash
+# 1. Install the skill
 mkdir -p ~/.claude/skills/codex-review
 curl -sL https://raw.githubusercontent.com/pauhu/claude-codex-review/main/skills/codex-review/SKILL.md \
   -o ~/.claude/skills/codex-review/SKILL.md
+
+# 2. Add Codex as MCP server
+npm install -g @openai/codex
+claude mcp add codex -s user -- codex mcp-server
 ```
 
 Restart Claude Code.
