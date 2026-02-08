@@ -1,11 +1,10 @@
 # Codex Code Review Skill for Claude Code
 
-Five-perspective code review as a Claude Code skill. Security, correctness, compliance, performance, maintainability.
+Two-agent code review: Claude reads (logic/security), Codex runs (tsc/lint/tests). Five perspectives: security, correctness, compliance, performance, maintainability.
 
 ## Install
 
 ```bash
-# 1. Install the skill
 mkdir -p ~/.claude/skills/codex-review
 curl -sL https://raw.githubusercontent.com/pauhu/claude-codex-review/main/skills/codex-review/SKILL.md \
   -o ~/.claude/skills/codex-review/SKILL.md
@@ -39,27 +38,35 @@ Reviews uncommitted changes. Also accepts:
 
 ## How it works
 
-The SKILL.md defines a four-step review:
+The SKILL.md defines a five-step review:
 
 1. **Scope** – determines what code to review
-2. **Second opinion** – tries Codex MCP, then Codex CLI, then adversarial self-review
-3. **Five perspectives** – security, correctness, compliance, performance, maintainability
-4. **Output** – severity table with actionable findings
+2. **Claude reads** – adversarial review from 5 perspectives (security, correctness, compliance, performance, maintainability)
+3. **Codex runs** – mechanical checks: `tsc --noEmit`, `eslint`, secret scan, TODO/FIXME grep
+4. **Merge** – combine logical findings with mechanical findings, deduplicate
+5. **Output** – severity table with source attribution (Claude vs Codex)
 
-### With Codex (optional)
+### With Codex CLI (recommended)
 
-If you have an OpenAI API key and [Codex CLI](https://github.com/openai/codex), the skill uses it as a genuine second opinion – a different model reviewing your code independently.
+If you have [Codex CLI](https://github.com/openai/codex) installed, the skill uses it as a mechanical verifier – running type checks, linters, and secret scans in a sandboxed environment.
 
 ```bash
 npm install -g @openai/codex
+```
+
+Without Codex, the skill falls back to running `tsc` and `eslint` directly.
+
+### With Codex MCP (alternative)
+
+You can also register Codex as an MCP server:
+
+```bash
 claude mcp add codex -s user -- codex mcp-server
 ```
 
-Without Codex, the skill still works. It falls back to adversarial self-review where Claude re-examines the code assuming it's broken.
-
 ### Experimental: Codex with Claude Max
 
-The `proxy/` folder contains an experimental adapter that routes Codex through your Claude Max subscription instead of an OpenAI key. This is work in progress – Codex's agentic tools (`exec_shell`, `apply_patch`) don't fully work with Claude as the backend model yet. The proxy infrastructure is ready for when Codex improves its model-agnostic support.
+The `proxy/` folder contains an experimental adapter that routes Codex through your Claude Max subscription instead of an OpenAI key. Codex's agentic tools (`exec_shell`, `apply_patch`) don't fully work with Claude as the backend model yet. The proxy infrastructure is ready for when Codex improves its model-agnostic support.
 
 ## Uninstall
 
@@ -69,4 +76,4 @@ rm -rf ~/.claude/skills/codex-review
 
 ## License
 
-MIT – [Pauhu](https://pauhu.ai)
+MIT – [Pauhu AI Ltd](https://pauhu.ai)
