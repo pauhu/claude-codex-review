@@ -1,18 +1,15 @@
 ---
 name: codex-review
-description: "Two-agent code review: Claude reads (logic/security), Codex runs (tsc/lint/tests). Use when the user asks for a code review or quality check."
+description: "Code review: read diffs, run checks, report findings."
 argument-hint: [scope]
 allowed-tools: Bash(codex *), Bash(git *), Bash(npx tsc*), Bash(npx eslint*), Read, Grep, Glob
 ---
 
-# Code Review – One Reads, One Runs
+# Code Review
 
-Review $ARGUMENTS using two complementary agents.
+Review $ARGUMENTS.
 
-**Claude** reads diffs and finds logic/security/compliance bugs.
-**Codex** runs mechanical checks the reader can't: type checker, linter, tests.
-
-Same model, different jobs. Don't use Codex as a second opinion – use it as a verifier.
+Read the diffs. Run the checks. Report what's broken. One pass.
 
 ## Step 1: Determine scope
 
@@ -21,52 +18,42 @@ Same model, different jobs. Don't use Codex as a second opinion – use it as a 
 - "branch" → `git diff main...HEAD`
 - "commit" → `git show HEAD`
 
-Read the relevant code now. Understand intent before judging.
+Read the code first. Understand intent before judging.
 
-## Step 2: Claude reads (5 perspectives)
+## Step 2: Read (5 perspectives)
 
-Review from each perspective. Be adversarial – assume the code is broken until proven otherwise.
+Assume the code is broken until proven otherwise.
 
-1. **Security** – injection, auth bypass, timing attacks, secrets in code, XSS, CSRF
-2. **Correctness** – logic errors, off-by-one, null/undefined, wrong types, unreachable code, broken control flow
-3. **Compliance** – data handling, consent flows, logging gaps, retention violations
-4. **Performance** – unnecessary loops, missing caching, unbounded payloads, N+1 queries
-5. **Maintainability** – dead code, unclear naming, missing error handling, unused imports
+1. **Security** — injection, auth bypass, timing attacks, secrets in code, XSS, CSRF
+2. **Correctness** — logic errors, off-by-one, null/undefined, wrong types, unreachable code
+3. **Compliance** — data handling, consent flows, logging gaps, retention violations
+4. **Performance** — unnecessary loops, missing caching, unbounded payloads, N+1 queries
+5. **Maintainability** — dead code, unclear naming, missing error handling, unused imports
 
-## Step 3: Codex runs (mechanical checks)
+## Step 3: Run checks
 
-Run these in order. Use the first Codex method that works:
+Run these on the changed files and report failures only:
 
-**A) Codex CLI** (preferred – has sandbox, can execute):
-```bash
-codex exec -s read-only "Run these checks on the codebase and report failures only:
-1. npx tsc --noEmit (type errors)
-2. npx eslint --no-warn . (lint errors only)
-3. grep -r 'TODO\|FIXME\|HACK\|XXX' in changed files
-4. Check for hardcoded secrets: API keys, tokens, passwords in source
-Report file names, line numbers, and error messages. No commentary."
-```
-
-Or use the built-in review command:
-```bash
-codex review --uncommitted
-```
-
-**B) Codex MCP tool** (if CLI unavailable):
-Call the codex MCP tool with: "Run tsc --noEmit and eslint on this project. Report only errors with file names and line numbers. Do not review code logic – only report tool output."
-
-**C) Manual fallback** (if both unavailable):
-Run directly:
 ```bash
 npx tsc --noEmit 2>&1 | head -50
 npx eslint --no-warn . 2>&1 | head -50
 ```
 
+Also check:
+- `grep -r 'TODO\|FIXME\|HACK\|XXX'` in changed files
+- Hardcoded secrets: API keys, tokens, passwords in source
+
+If you have Codex CLI available, you can run checks in its sandbox:
+```bash
+codex exec -s read-only "npx tsc --noEmit && npx eslint --no-warn ."
+```
+
+This is optional. Direct execution works fine for trusted repos.
+
 ## Step 4: Merge findings
 
-Combine Claude's logical findings with Codex's mechanical findings. Deduplicate – if both found the same issue, keep the more specific one.
+Combine reading findings with check output. Deduplicate — keep the more specific version.
 
-For each finding:
 - **CRITICAL** / **HIGH** → fix immediately
 - **MEDIUM** → note in report
 - **LOW** → skip unless trivial
@@ -77,16 +64,15 @@ For each finding:
 ## Code Review Results
 
 ### Findings
-| # | Source | Perspective | Severity | File | Issue | Action |
-|---|--------|-------------|----------|------|-------|--------|
-| 1 | Claude | Security | CRITICAL | ... | ... | Fixed |
-| 2 | Codex  | Correctness | HIGH | ... | tsc: Type 'X' not assignable... | Fixed |
-| 3 | Claude | Compliance | MEDIUM | ... | ... | Noted |
+| # | Perspective | Severity | File | Issue | Action |
+|---|-------------|----------|------|-------|--------|
+| 1 | Security | CRITICAL | ... | ... | Fixed |
+| 2 | Correctness | HIGH | ... | tsc: Type 'X' not assignable... | Fixed |
+| 3 | Compliance | MEDIUM | ... | ... | Noted |
 
 ### Summary
 - Files reviewed: X
-- Claude findings: X (logic/security/compliance)
-- Codex findings: X (type errors/lint/secrets)
+- Findings: X
 - Issues fixed: X
 
 ### Fixes Applied
@@ -94,4 +80,4 @@ For each finding:
 ```
 
 ---
-Copyright (c) 2026 Pauhu AI Ltd – MIT License – github.com/pauhu/claude-codex-review
+Copyright (c) 2026 Pauhu AI Ltd — MIT License — github.com/pauhu/claude-codex-review
