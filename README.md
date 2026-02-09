@@ -22,7 +22,7 @@ your-project/
             └── SKILL.md
 ```
 
-Everyone who clones gets it.
+Everyone who clones the skill will be able to use it.
 
 ## Use
 
@@ -58,3 +58,4 @@ rm -rf .claude/skills/codex-review
 ## License
 
 MIT — [Pauhu AI Ltd](https://pauhu.ai)
+
