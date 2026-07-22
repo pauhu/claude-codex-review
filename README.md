@@ -1,7 +1,7 @@
 # Codex Code Review Skill for Claude Code
 
 Two-agent code review: Claude reads diffs for logic, security, and compliance bugs; Codex runs
-the mechanical checks a reader can't (type checker, linter, tests). Same model, different jobs.
+the mechanical checks a reader can't (type checker, linter, tests).
 
 ## Install
 
